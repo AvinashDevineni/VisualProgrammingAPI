@@ -20,5 +20,5 @@ from vprog import views
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('api/', views.run_psuedocode)
+    path('api/', views.run_pseudocode)
 ]

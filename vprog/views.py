@@ -1,44 +1,216 @@
+import re
+import math
+
 from django.http import JsonResponse
 from rest_framework.decorators import api_view
 
-def is_code_function(code) -> bool:
-    pass
+_NAME_REGEX = r"[a-zA-Z_][a-zA-Z0-9_]*"
 
-def parse_function(code) -> tuple[str, list[str]]:
-    pass
+_MODULES = {"math": math}
 
-def convert_function(code) -> str:
-    pass
+def is_pseudocode_function(code: str) -> bool:
+    return bool(re.match(_NAME_REGEX + r"\(.*\)", code))
 
-def is_code_assignment(code) -> bool:
-    pass
+'''
+    TODO
+    would be nice for the code returned from the list funcs to work
+    for both lists and strings since the same naming makes sense,
+    preventing names such as GET_AT_LIST or REMOVE_AT_STRING which
+    would be annoying as a user
+'''
+def convert_function_pseudocode(code: str) -> str:
+    codeIdx = 0
 
-def convert_assignment(code) -> str:
-    pass
+    funcName = ''
+    while codeIdx < len(code):
+        if code[codeIdx] == '(':
+            codeIdx += 1
+            break
+        # .upper() to ensure all uppercase for match statement later
+        funcName += code[codeIdx].upper()
+        codeIdx += 1
 
-def convert_to_python(code) -> str:
-    if is_code_function(code):
-        return convert_function(code)
+    curFuncParam: str = ''
+    inString = False # doesn't work properly when quotes are in a string
+
+    # for error checking
+    numOpeningParentheses = 0
+    numClosingParentheses = 0
+
+    funcParamsString: str = ''
+    funcParamsList: list[str] = []
+    numParams = 0
+    while codeIdx < len(code) - 1: # - 1 because last char is )
+        if code[codeIdx] == '(' and not inString:
+            numOpeningParentheses += 1
+        
+        elif code[codeIdx] == ')' and not inString:
+            numClosingParentheses += 1
+        
+        if code[codeIdx] == ',' and not inString:
+            if is_pseudocode_function(curFuncParam):
+                curFuncParam = convert_function_pseudocode(curFuncParam)
+            
+            funcParamsString += f"{curFuncParam}, "
+            funcParamsList.append(curFuncParam)
+            curFuncParam = ''
+            numParams += 1
+
+        elif inString or code[codeIdx] != ' ':
+            curFuncParam += code[codeIdx]
+        
+        if code[codeIdx] == '"':
+            inString = not inString
+
+        codeIdx += 1
+
+    if is_pseudocode_function(curFuncParam):
+        curFuncParam = convert_function_pseudocode(curFuncParam)
+    funcParamsString += curFuncParam
+    funcParamsList.append(curFuncParam)
+    numParams += 1
+
+    parenthesesDiff = numOpeningParentheses - numClosingParentheses
+    if parenthesesDiff > 0:
+        raise SyntaxError(f"{parenthesesDiff} '(' {'was' if parenthesesDiff == 1 else 'were'} not closed.")
     
-    if is_code_assignment(code):
-        return convert_assignment(code)
+    elif parenthesesDiff < 0:
+        raise SyntaxError(f"{-parenthesesDiff} ')' {'is' if parenthesesDiff == -1 else 'are'} unnecessary.")
+
+    resCode = ''
+
+    # functions with params
+    numParamsAccepted = None # setting to none to check if func takes params
+    try: # wrapping in try except bc of funcParamsList being accessed
+        match funcName:
+            #region Math Funcs
+            #region Trig Funcs
+            case 'COS':
+                numParamsAccepted = 1
+                resCode = f"math.cos({funcParamsString})"
+            case 'SIN':
+                numParamsAccepted = 1
+                resCode = f"math.sin({funcParamsString})"
+            case 'TAN':
+                numParamsAccepted = 1
+                resCode = f"math.tan({funcParamsString})"
+            case 'ARC_COS':
+                numParamsAccepted = 1
+                return f"math.acos({funcParamsString})"
+            case 'ARC_SIN':
+                numParamsAccepted = 1
+                resCode = f"math.asin({funcParamsString})"
+            case 'ARC_TAN':
+                numParamsAccepted = 1
+                resCode = f"math.atan({funcParamsString})"
+            #endregion
+            
+            case 'POWER':
+                numParamsAccepted = 2
+                resCode = f"math.pow({funcParamsString})"
+            #endregion
+
+            #region List Funcs
+            case 'APPEND_TO': # 0 is list, 1 is val
+                numParamsAccepted = 2
+                resCode = f"{funcParamsList[0]}.append({funcParamsList[1]})"
+
+            case 'REMOVE_FROM':
+                numParamsAccepted = 1
+                resCode = f"{funcParamsString} = {funcParamsString}[:-1]"
+
+            case 'REMOVE_AT': # 0 is index, 1 is list
+                numParamsAccepted = 2
+                resCode = f"{funcParamsList[1]}.remove({funcParamsList[1]}[{funcParamsList[0]}])"
+
+            case 'GET_FROM':
+                numParamsAccepted = 1
+                resCode = f"{funcParamsString}[len({funcParamsString}) - 1]"
+
+            case 'GET_AT': # 0 is index, 1 is list
+                numParamsAccepted = 2
+                resCode = f"{funcParamsList[1]}[{funcParamsList[0]}]"
+            #endregion
+
+            case 'PRINT':
+                numParamsAccepted = 1
+                resCode = f"print({funcParamsString})"
+
+    except:
+        raise TypeError(f"{funcName} takes "\
+                        f"{numParamsAccepted} {'argument' if numParamsAccepted == 1 else 'arguments'}. "\
+                        f"{numParams} {'was' if numParams == 1 else 'were'} passed.")
     
+    # checking if != None bc a valid func may not take params
+    if numParamsAccepted != None and numParamsAccepted != numParams:
+        raise TypeError(f"{funcName} takes "\
+                        f"{numParamsAccepted} {'argument' if numParamsAccepted == 1 else 'arguments'}. "\
+                        f"{numParams} {'was' if numParams == 1 else 'were'} passed.")
+
+    # functions with no params
+    isNoParamFunc = False
+    match funcName:
+        #region Math Funcs
+        case 'EULER':
+            isNoParamFunc = True
+            resCode = 'math.e'
+        case 'PI':
+            isNoParamFunc = True
+            resCode = 'math.pi'
+        #endregion
+
+    if isNoParamFunc and funcParamsString != '':
+        raise TypeError(f"{funcName} takes no arguments. "\
+                        f"{numParams} {'was' if numParams == 1 else 'were'} passed.")
+
+    if resCode == '':
+        raise NameError(f"{funcName} is not a defined function.")
+
+    return resCode
+    
+def is_pseudocode_assignment(code: str) -> bool:
+    # allows rhs of assignment to be anything
+    # also allows multiple equal signs
+    return bool(re.match(_NAME_REGEX + r"\s*=\s*.*", code))
+
+def convert_assignment_pseudocode(code: str) -> str:
+    codeIdx = 0
+
+    varName = ''
+    while codeIdx < len(code):
+        if code[codeIdx] == '=':
+            codeIdx += 1
+            break
+        elif code[codeIdx] != ' ':
+            varName += code[codeIdx]
+
+    assignmentVal = ''
+    while codeIdx < len(code):
+        if code[codeIdx] != ' ':
+            assignmentVal += code[codeIdx]
+
+    if is_pseudocode_function(assignmentVal):
+        assignmentVal = convert_function_pseudocode(assignmentVal)
+
+    return f"{varName} = {assignmentVal}"
+
+def convert_to_python(code: str) -> str:
+    if is_pseudocode_function(code):
+        return convert_function_pseudocode(code)
+    
+    if is_pseudocode_assignment(code):
+        return convert_assignment_pseudocode(code)
+
+# TODO: implement func, will either write to a python file or use exec
 def run_code(code: str) -> str:
     pass
 
-
 @api_view(['POST'])
-def run_psuedocode(request):
-    codeList = []
-    print('DATA:', request.data)
+def run_pseudocode(request):
+    convertedCode = ''
     for code in request.data['code']:
-        codeList.append(convert_to_python(code))
+        convertedCode += f"{convert_to_python(code)}\n"
 
-    codeString = ''
-    for code in codeList:
-        codeString += f'{code}\n'
-
-    output = run_code(codeString)
+    # output = run_code(convertedCode)
     
-    # temp, later will send output as response
-    return JsonResponse({'res': output})
+    return JsonResponse({'res': convertedCode})
