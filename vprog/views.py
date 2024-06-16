@@ -1,12 +1,19 @@
+import os
+import shutil
+import traceback
+import random
 import re
-import math
 
 from django.http import JsonResponse
 from rest_framework.decorators import api_view
 
 _NAME_REGEX = r"[a-zA-Z_][a-zA-Z0-9_]*"
 
-_MODULES = {"math": math}
+_CODE_BASE_DIR = 'prog_files'
+_OUTPUT_FILE_VAR_NAME = 'outputFile' 
+_MODULES = ['math']
+_MIN_FOLDER_INT = -9999999
+_MAX_FOLDER_INT = 9999999
 
 def is_pseudocode_function(code: str) -> bool:
     return bool(re.match(_NAME_REGEX + r"\(.*\)", code))
@@ -134,9 +141,9 @@ def convert_function_pseudocode(code: str) -> str:
 
             case 'PRINT':
                 numParamsAccepted = 1
-                resCode = f"print({funcParamsString})"
+                resCode = f"print({funcParamsString}, file={_OUTPUT_FILE_VAR_NAME})"
 
-    except:
+    except IndexError:
         raise TypeError(f"{funcName} takes "\
                         f"{numParamsAccepted} {'argument' if numParamsAccepted == 1 else 'arguments'}. "\
                         f"{numParams} {'was' if numParams == 1 else 'were'} passed.")
@@ -184,10 +191,14 @@ def convert_assignment_pseudocode(code: str) -> str:
         elif code[codeIdx] != ' ':
             varName += code[codeIdx]
 
+        codeIdx += 1
+
     assignmentVal = ''
     while codeIdx < len(code):
         if code[codeIdx] != ' ':
             assignmentVal += code[codeIdx]
+
+        codeIdx += 1
 
     if is_pseudocode_function(assignmentVal):
         assignmentVal = convert_function_pseudocode(assignmentVal)
@@ -201,9 +212,42 @@ def convert_to_python(code: str) -> str:
     if is_pseudocode_assignment(code):
         return convert_assignment_pseudocode(code)
 
-# TODO: implement func, will either write to a python file or use exec
 def run_code(code: str) -> str:
-    pass
+    folderPath = random.randint(_MIN_FOLDER_INT, _MAX_FOLDER_INT)
+    folderPath = os.path.join(_CODE_BASE_DIR, str(folderPath))
+    while (os.path.isdir(folderPath)):
+        folderPath = random.randint(_MIN_FOLDER_INT, _MAX_FOLDER_INT)
+        folderPath = os.path.join(_CODE_BASE_DIR, str(folderPath))
+
+    os.mkdir(folderPath)
+
+    PY_FILE = os.path.join(folderPath, 'user_code.py')
+    OUTPUT_FILE = os.path.join(folderPath, 'output.txt')
+
+    with open(PY_FILE, 'w') as pyFile:
+        for module in _MODULES: # importing required modules
+            pyFile.write(f"import {module}\n")
+
+        pyFile.write(f"{_OUTPUT_FILE_VAR_NAME} = open(r\"{OUTPUT_FILE}\", 'w')\n") # for print func
+        pyFile.write(f"{code}\n")
+        pyFile.write(f"{_OUTPUT_FILE_VAR_NAME}.close()")
+
+    open(OUTPUT_FILE, 'x').close()
+
+    try:
+        with open(PY_FILE) as userCode:
+            exec(userCode.read())
+    except Exception:
+        traceback.print_exc()
+
+    output = ''
+    with open(OUTPUT_FILE) as outputFile:
+        for line in outputFile.readlines():
+            output += line
+
+    #shutil.rmtree(folderPath)
+
+    return output
 
 @api_view(['POST'])
 def run_pseudocode(request):
@@ -211,6 +255,6 @@ def run_pseudocode(request):
     for code in request.data['code']:
         convertedCode += f"{convert_to_python(code)}\n"
 
-    # output = run_code(convertedCode)
+    output = run_code(convertedCode)
     
-    return JsonResponse({'res': convertedCode})
+    return JsonResponse({'res': output})
