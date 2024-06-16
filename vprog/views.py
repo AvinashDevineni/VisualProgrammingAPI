@@ -245,7 +245,7 @@ def run_code(code: str) -> str:
         for line in outputFile.readlines():
             output += line
 
-    #shutil.rmtree(folderPath)
+    shutil.rmtree(folderPath)
 
     return output
 
